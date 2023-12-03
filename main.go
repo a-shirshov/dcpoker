@@ -2,15 +2,30 @@ package main
 
 import (
 	"fmt"
-	"math/rand"
 	"time"
 
 	"github.com/a-shirshov/dcpoker/deck"
+	"github.com/a-shirshov/dcpoker/p2p"
 )
 
 func main() {
-	rand.New(rand.NewSource(time.Now().UnixNano()))
-	d := deck.New()
-	fmt.Println(d)
-	fmt.Println()
+	cfg := p2p.ServerConfig{
+		Version: "DCPoker v.0.1-alpha",
+		ListenAddr: ":3000",
+	}
+
+	server := p2p.NewServer(cfg)
+	go server.Start()
+
+	time.Sleep(1 * time.Second)
+
+	remoteCfg := p2p.ServerConfig{
+		Version: "DCPoker v.0.1-alpha",
+		ListenAddr: ":4000",
+	}
+	remoteServer := p2p.NewServer(remoteCfg)
+	go remoteServer.Start()
+	remoteServer.Connect(":3000")
+	fmt.Println(deck.New())
+	
 }
