@@ -1,10 +1,8 @@
 package main
 
 import (
-	"fmt"
 	"time"
 
-	"github.com/a-shirshov/dcpoker/deck"
 	"github.com/a-shirshov/dcpoker/p2p"
 )
 
@@ -25,7 +23,7 @@ func main() {
 	}
 	remoteServer := p2p.NewServer(remoteCfg)
 	go remoteServer.Start()
+
 	remoteServer.Connect(":3000")
-	fmt.Println(deck.New())
-	
+	select{}
 }
