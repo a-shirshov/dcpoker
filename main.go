@@ -8,6 +8,7 @@ import (
 
 func main() {
 	cfg := p2p.ServerConfig{
+		ID: 1,
 		Version: "DCPoker v.0.1-alpha",
 		ListenAddr: ":3000",
 		GameVariant: p2p.TexasHoldem,
@@ -19,6 +20,7 @@ func main() {
 	time.Sleep(1 * time.Second)
 
 	remoteCfg := p2p.ServerConfig{
+		ID: 2,
 		Version: "DCPoker v.0.1-alpha",
 		ListenAddr: ":4000",
 		GameVariant: p2p.TexasHoldem,
