@@ -10,6 +10,7 @@ func main() {
 	cfg := p2p.ServerConfig{
 		Version: "DCPoker v.0.1-alpha",
 		ListenAddr: ":3000",
+		GameVariant: p2p.TexasHoldem,
 	}
 
 	server := p2p.NewServer(cfg)
@@ -20,10 +21,11 @@ func main() {
 	remoteCfg := p2p.ServerConfig{
 		Version: "DCPoker v.0.1-alpha",
 		ListenAddr: ":4000",
+		GameVariant: p2p.TexasHoldem,
 	}
 	remoteServer := p2p.NewServer(remoteCfg)
 	go remoteServer.Start()
 
 	remoteServer.Connect(":3000")
-	select{}
+	time.Sleep(5 * time.Second)
 }

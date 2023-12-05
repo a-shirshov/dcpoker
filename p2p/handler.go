@@ -17,6 +17,6 @@ func (h *DefaultHandler) HandleMessage(msg *Message) error {
 		return err
 	}
 
-	fmt.Printf("handling the msg from %s: %s", msg.From, string(b))
-	return err
+	fmt.Printf("handling the msg from %s: %s\n", msg.From, string(b))
+	return nil
 }
