@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/sirupsen/logrus"
 )
@@ -79,13 +80,15 @@ func (s *Server) Start() {
 func (s *Server) sendPeerList(p *Peer) error {
 
 	peerList := MessagePeerList{
-		Peers: make([]string, len(s.peers)),
+		Peers: []string{},
 	}
 
-	it := 0
-	for addr := range s.peers {
-		peerList.Peers[it] = addr.String()
-		it++
+	for _, peer := range s.peers {
+		peerList.Peers = append(peerList.Peers, peer.listenAddr)
+	}
+
+	if len(peerList.Peers) == 0 {
+		return nil
 	}
 
 	msg := NewMessage(s.ListenAddr, peerList)
@@ -102,6 +105,7 @@ func (s *Server) SendHandshake(p *Peer) error {
 		GameVariant: s.GameVariant,
 		Version: s.Version,
 		GameStatus: s.gameState.gameStatus,
+		ListenAddr: s.ListenAddr,
 	}
 
 	buf := new(bytes.Buffer)
@@ -112,8 +116,21 @@ func (s *Server) SendHandshake(p *Peer) error {
 	return p.Send(buf.Bytes())
 }
 
+func (s *Server) isInPeerList(addr string) bool {
+	for _, peer := range s.peers {
+		if peer.listenAddr == addr {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) Connect(addr string) error {
-	conn, err := net.Dial("tcp", addr)
+	if s.isInPeerList(addr) {
+		return nil
+	}
+
+	conn, err := net.DialTimeout("tcp", addr, 1*time.Second)
 	if err != nil {
 		return err
 	}
@@ -139,64 +156,69 @@ func(s *Server) loop() {
 
 			delete(s.peers, peer.conn.RemoteAddr())
 		case peer := <-s.addPeer:
-			if err := s.handshake(peer); err != nil {
-				logrus.Errorf("handshake failed with incoming player %s", err)
-				peer.conn.Close()
-				delete(s.peers, peer.conn.RemoteAddr())
-				continue
+			if err := s.handleNewPeer(peer); err != nil {
+				logrus.Errorf("handle peer error: %s", err)
 			}
-
-			go peer.ReadLoop(s.msgCh)
-
-			if !peer.outbound {
-				if err := s.SendHandshake(peer); err != nil {
-					logrus.Errorf("failed to dend handshake with peer %s", err)
-					peer.conn.Close()
-					delete(s.peers, peer.conn.RemoteAddr())
-					continue
-				}
-
-				if err := s.sendPeerList(peer); err != nil {
-					logrus.Errorf("peerlist error: %s", err)
-					continue
-				}
-			}
-
-			logrus.WithFields(logrus.Fields{
-				"addr": peer.conn.RemoteAddr(),
-				"local": peer.conn.LocalAddr(),
-			}).Info("handshake successful new player connected")
-
-			s.peers[peer.conn.RemoteAddr()] = peer
 			
 		case msg := <-s.msgCh:
 			if err := s.HandleMessage(msg); err != nil {
-				panic(err)
+				logrus.Errorf("handle msg error: %s", err)
 			}
 		}
 	}
 }
 
-func (s *Server) handshake(p *Peer) error {
-	hs := &Handshake{}
-	if err := gob.NewDecoder(p.conn).Decode(hs); err != nil {
-		return err
+func (s *Server) handleNewPeer(peer *Peer) error {
+	hs, err := s.handshake(peer)
+	if err != nil {
+		peer.conn.Close()
+		delete(s.peers, peer.conn.RemoteAddr())
+		return fmt.Errorf("handshake failed with incoming player %s", err)
 	}
-	
-	if s.GameVariant != hs.GameVariant {
-		return fmt.Errorf("gamevariant does not match %s", hs.GameVariant)
-	}
-	if s.Version != hs.Version {
-		return fmt.Errorf("version does not match %s", hs.Version)
+
+	go peer.ReadLoop(s.msgCh)
+
+	if !peer.outbound {
+		if err := s.SendHandshake(peer); err != nil {
+			peer.conn.Close()
+			delete(s.peers, peer.conn.RemoteAddr())
+			return fmt.Errorf("failed to dend handshake with peer %s", err)
+		}
+
+		if err := s.sendPeerList(peer); err != nil {
+			return fmt.Errorf("peerlist error: %s", err)
+		}
 	}
 
 	logrus.WithFields(logrus.Fields{
-		"peer": p.conn.RemoteAddr(),
+		"peer": peer.conn.RemoteAddr(),
 		"version": hs.Version,
 		"variant": hs.GameVariant,
 		"gameStatus": hs.GameStatus,
-	}).Info("received handshake")
+		"listenAddr": peer.listenAddr,
+		"we": s.ListenAddr,
+	}).Info("handshake successful new player connected")
+
+	s.peers[peer.conn.RemoteAddr()] = peer
 	return nil
+}
+
+func (s *Server) handshake(p *Peer) (*Handshake, error) {
+	hs := &Handshake{}
+	if err := gob.NewDecoder(p.conn).Decode(hs); err != nil {
+		return nil, err
+	}
+	
+	if s.GameVariant != hs.GameVariant {
+		return nil, fmt.Errorf("gamevariant does not match %s", hs.GameVariant)
+	}
+	if s.Version != hs.Version {
+		return nil, fmt.Errorf("version does not match %s", hs.Version)
+	}
+
+	p.listenAddr = hs.ListenAddr
+
+	return hs, nil
 }
 
 func (s *Server) HandleMessage(msg *Message) error {
@@ -213,6 +235,10 @@ func (s *Server) HandleMessage(msg *Message) error {
 }
 
 func (s *Server) handlePeerList(l MessagePeerList) error {
+	logrus.WithFields(logrus.Fields{
+		"we": s.ListenAddr,
+		"list:": l.Peers,
+	}).Info("received PeerList")
 	for i := 0; i < len(l.Peers); i++ {
 		if err := s.Connect(l.Peers[i]); err != nil {
 			logrus.Errorf("failed to dial peer: %s", err)
