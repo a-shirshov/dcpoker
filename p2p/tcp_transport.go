@@ -1,7 +1,7 @@
 package p2p
 
 import (
-	"bytes"
+	"encoding/gob"
 	"net"
 
 	"github.com/sirupsen/logrus"
@@ -17,18 +17,26 @@ func (p Peer) Send(b []byte) error {
 	return err
 }
 
-func (p *Peer) readLoop(msgch chan *Message) {
-	buf := make([]byte, 1024)
+func (p *Peer) ReadLoop(msgch chan *Message) {
+	// buf := make([]byte, 1024)
 	for {
-		n, err := p.conn.Read(buf)
-		if err != nil {
+		// n, err := p.conn.Read(buf)
+		// if err != nil {
+		// 	break
+		// }
+
+		msg := &Message{}
+		if err := gob.NewDecoder(p.conn).Decode(msg); err != nil {
+			logrus.Errorf("decode message error: %s", err)
 			break
 		}
 
-		msgch <-&Message{
-			From: p.conn.RemoteAddr(),
-			Payload: bytes.NewReader(buf[:n]),
-		}
+		msgch <-msg
+
+		// msgch <-&Message{
+		// 	From: p.conn.RemoteAddr(),
+		// 	Payload: bytes.NewReader(buf[:n]),
+		// }
 	}
 
 	p.conn.Close()

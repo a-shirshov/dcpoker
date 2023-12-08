@@ -1,17 +1,26 @@
 package p2p
 
 import (
-	"io"
-	"net"
 )
 
 type Message struct {
-	Payload io.Reader
-	From net.Addr
+	Payload any
+	From string
+}
+
+func NewMessage(from string, payload any) *Message {
+	return &Message{
+		From: from,
+		Payload: payload,
+	}
 }
 
 type Handshake struct {
 	Version string
 	GameVariant GameVariant
 	GameStatus GameStatus
+}
+
+type MessagePeerList struct {
+	Peers []string
 }
