@@ -39,7 +39,7 @@ type Server struct {
 	ServerConfig
 
 	transport *TCPTransport
-	mu sync.RWMutex
+	peerLock sync.RWMutex
 	peers map[net.Addr] *Peer
 	addPeer chan *Peer
 	delPeer chan *Peer
@@ -83,9 +83,17 @@ func (s *Server) sendPeerList(p *Peer) error {
 		Peers: []string{},
 	}
 
-	for _, peer := range s.peers {
-		peerList.Peers = append(peerList.Peers, peer.listenAddr)
+	peers := s.Peers()
+	for i := 0; i < len(peers); i++ {
+		if peers[i] != p.listenAddr {
+			peerList.Peers = append(peerList.Peers, peers[i])
+		}
 	}
+
+	
+	// for _, peer := range s.peers {
+	// 	peerList.Peers = append(peerList.Peers, peer.listenAddr)
+	// }
 
 	if len(peerList.Peers) == 0 {
 		return nil
@@ -98,6 +106,27 @@ func (s *Server) sendPeerList(p *Peer) error {
 	}
 
 	return p.Send(buf.Bytes())
+}
+
+func (s *Server) AddPeer(p *Peer) {
+	s.peerLock.Lock()
+	defer s.peerLock.Unlock()
+
+	s.peers[p.conn.RemoteAddr()] = p
+}
+
+func (s *Server) Peers() []string {
+	s.peerLock.RLock()
+	defer s.peerLock.RUnlock()
+
+	peers := make([]string, len(s.peers))
+	it := 0
+	for _, peer := range s.peers {
+		peers[it] = peer.listenAddr
+		it++
+	}
+
+	return peers
 }
 
 func (s *Server) SendHandshake(p *Peer) error {
@@ -117,8 +146,9 @@ func (s *Server) SendHandshake(p *Peer) error {
 }
 
 func (s *Server) isInPeerList(addr string) bool {
-	for _, peer := range s.peers {
-		if peer.listenAddr == addr {
+	peers := s.Peers()
+	for i := 0; i < len(peers); i++ {
+		if peers[i] == addr {
 			return true
 		}
 	}
@@ -127,6 +157,7 @@ func (s *Server) isInPeerList(addr string) bool {
 
 func (s *Server) Connect(addr string) error {
 	if s.isInPeerList(addr) {
+		//fmt.Printf("already in peerlist %s\n", addr)
 		return nil
 	}
 
@@ -185,9 +216,12 @@ func (s *Server) handleNewPeer(peer *Peer) error {
 			return fmt.Errorf("failed to dend handshake with peer %s", err)
 		}
 
-		if err := s.sendPeerList(peer); err != nil {
-			return fmt.Errorf("peerlist error: %s", err)
-		}
+		go func() {
+			if err := s.sendPeerList(peer); err != nil {
+				logrus.Errorf("peerlist error: %s", err)
+			}
+		}()
+		
 	}
 
 	logrus.WithFields(logrus.Fields{
@@ -199,7 +233,8 @@ func (s *Server) handleNewPeer(peer *Peer) error {
 		"we": s.ListenAddr,
 	}).Info("handshake successful new player connected")
 
-	s.peers[peer.conn.RemoteAddr()] = peer
+	//s.peers[peer.conn.RemoteAddr()] = peer
+	s.AddPeer(peer)
 	return nil
 }
 
@@ -224,11 +259,11 @@ func (s *Server) handshake(p *Peer) (*Handshake, error) {
 func (s *Server) HandleMessage(msg *Message) error {
 	logrus.WithFields(logrus.Fields{
 		"from": msg.From,
-	}).Info("received message")
+	})//.Info("received message")
 
 	switch v := msg.Payload.(type) {
 	case MessagePeerList:
-		fmt.Printf("peers => %+v\n", v.Peers)
+		//fmt.Printf("peers => %+v\n", v.Peers)
 		return s.handlePeerList(v)
 	}
 	return nil
@@ -238,7 +273,7 @@ func (s *Server) handlePeerList(l MessagePeerList) error {
 	logrus.WithFields(logrus.Fields{
 		"we": s.ListenAddr,
 		"list:": l.Peers,
-	}).Info("received PeerList")
+	})//.Info("received PeerList")
 	for i := 0; i < len(l.Peers); i++ {
 		if err := s.Connect(l.Peers[i]); err != nil {
 			logrus.Errorf("failed to dial peer: %s", err)
