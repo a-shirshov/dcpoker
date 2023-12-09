@@ -57,6 +57,10 @@ func NewServer(cfg ServerConfig) *Server {
 		gameState: NewGameState(),
 	}
 
+	if s.ListenAddr == ":3000" {
+		s.gameState.isDealer = true
+	}
+
 	tr := NewTCPTransport(s.ListenAddr)
 	s.transport = tr
 	
@@ -89,11 +93,6 @@ func (s *Server) sendPeerList(p *Peer) error {
 			peerList.Peers = append(peerList.Peers, peers[i])
 		}
 	}
-
-	
-	// for _, peer := range s.peers {
-	// 	peerList.Peers = append(peerList.Peers, peer.listenAddr)
-	// }
 
 	if len(peerList.Peers) == 0 {
 		return nil
@@ -233,8 +232,9 @@ func (s *Server) handleNewPeer(peer *Peer) error {
 		"we": s.ListenAddr,
 	}).Info("handshake successful new player connected")
 
-	//s.peers[peer.conn.RemoteAddr()] = peer
 	s.AddPeer(peer)
+
+	s.gameState.AddPlayer(peer.listenAddr, hs.GameStatus)
 	return nil
 }
 
