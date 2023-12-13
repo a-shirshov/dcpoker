@@ -1,7 +1,6 @@
 package p2p
 
-import (
-)
+import "github.com/a-shirshov/dcpoker/deck"
 
 type Message struct {
 	Payload any
@@ -24,4 +23,8 @@ type Handshake struct {
 
 type MessagePeerList struct {
 	Peers []string
+}
+
+type MessageCards struct {
+	Deck deck.Deck
 }

@@ -5,15 +5,18 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/a-shirshov/dcpoker/deck"
 	"github.com/sirupsen/logrus"
 )
 
-type GameStatus uint32
+type GameStatus int32
 
 func (g GameStatus) String() string {
 	switch g{
 	case GameStatusWaitingForCards:
 		return "WAITING FOR CARDS"
+	case GameStatusReceivingCards:
+		return "RECEIVING CARDS"
 	case GameStatusDealing:
 		return "DEALING"
 	case GameStatusPreFlop:
@@ -31,6 +34,7 @@ func (g GameStatus) String() string {
 
 const (
 	GameStatusWaitingForCards GameStatus = iota
+	GameStatusReceivingCards
 	GameStatusDealing 
 	GameStatusPreFlop
 	GameStatusFlop
@@ -43,12 +47,32 @@ type Player struct {
 }
 
 type GameState struct {
+	listenAddr string
+	broadcastch chan any
 	isDealer bool
 	gameStatus GameStatus
 
 	playersWaitingForCards int32
 	playerLock sync.RWMutex
 	players map[string]*Player
+}
+
+func NewGameState(addr string,broadcastch chan any) *GameState {
+	g := &GameState{
+		listenAddr: addr,
+		broadcastch: broadcastch,
+		isDealer: false,
+		gameStatus: GameStatusWaitingForCards,
+		players: make(map[string]*Player),
+	}
+
+	go g.loop()
+
+	return g
+}
+
+func (g *GameState) SetStatus(s GameStatus) {
+	atomic.StoreInt32((*int32)(&g.gameStatus), int32(s))
 }
 
 func (g *GameState) AddPlayerWaitingForCards() {
@@ -61,8 +85,21 @@ func (g *GameState) CheckNeedDealCards() {
 	if playersWaiting == int32(len(g.players)) && 
 	g.isDealer && 
 	g.gameStatus == GameStatusWaitingForCards {
-		logrus.Println("dealing cards")
+		logrus.WithFields(logrus.Fields{
+			"address": g.listenAddr,
+		}).Info("need to deal cards")
+
+		g.DealCards()
 	}
+}
+
+func (g *GameState) DealCards() {
+	deck := deck.New()
+	cards := MessageCards {
+		Deck: deck,
+	}
+
+	g.broadcastch <- cards
 }
 
 func (g *GameState) SetPlayerStatus(addr string, status GameStatus) {
@@ -95,24 +132,10 @@ func (g *GameState) AddPlayer(addr string, status GameStatus) {
 
 	g.SetPlayerStatus(addr, status)
 
-	//g.CheckNeedDealCards()
-
 	logrus.WithFields(logrus.Fields{
 		"addr": addr,
 		"status": status,
 	}).Info("new player joined")
-}
-
-func NewGameState() *GameState {
-	g := &GameState{
-		isDealer: false,
-		gameStatus: GameStatusWaitingForCards,
-		players: make(map[string]*Player),
-	}
-
-	go g.loop()
-
-	return g
 }
 
 func (g *GameState) loop() {

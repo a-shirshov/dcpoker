@@ -44,6 +44,7 @@ type Server struct {
 	addPeer chan *Peer
 	delPeer chan *Peer
 	msgCh chan *Message
+	broadcastch chan any
 	gameState *GameState
 }
 
@@ -54,8 +55,11 @@ func NewServer(cfg ServerConfig) *Server {
 		addPeer: make(chan *Peer, 100),
 		delPeer: make(chan *Peer),
 		msgCh: make(chan *Message),
-		gameState: NewGameState(),
+		broadcastch: make(chan any),
 	}
+
+	s.gameState = NewGameState(s.ListenAddr, s.broadcastch)
+
 
 	if s.ListenAddr == ":3000" {
 		s.gameState.isDealer = true
@@ -77,6 +81,13 @@ func (s *Server) Start() {
 		"port": s.ListenAddr,
 		"variant": s.GameVariant,
 	}).Info("started new game server")
+
+	go func() {
+		msg := <-s.broadcastch
+		if err := s.Broadcast(msg); err != nil {
+			logrus.Errorf("broadcast error: %s", err)
+		}
+	}()
 
 	s.transport.ListenAndAccept()
 }
@@ -156,7 +167,6 @@ func (s *Server) isInPeerList(addr string) bool {
 
 func (s *Server) Connect(addr string) error {
 	if s.isInPeerList(addr) {
-		//fmt.Printf("already in peerlist %s\n", addr)
 		return nil
 	}
 
@@ -194,6 +204,7 @@ func(s *Server) loop() {
 			if err := s.HandleMessage(msg); err != nil {
 				logrus.Errorf("handle msg error: %s", err)
 			}
+
 		}
 	}
 }
@@ -238,6 +249,24 @@ func (s *Server) handleNewPeer(peer *Peer) error {
 	return nil
 }
 
+func (s *Server) Broadcast(payload any) error {
+	msg := NewMessage(s.ListenAddr, payload)
+
+	buf := new(bytes.Buffer)
+	if err := gob.NewEncoder(buf).Encode(msg); err != nil {
+		return err
+	}
+
+	for _, peer := range s.peers {
+		go func(peer *Peer) {
+			if err := peer.Send(buf.Bytes()); err != nil {
+				logrus.Errorf("broadcast to peer error: %s", err)
+			}
+		}(peer)
+	}
+	return nil
+}
+
 func (s *Server) handshake(p *Peer) (*Handshake, error) {
 	hs := &Handshake{}
 	if err := gob.NewDecoder(p.conn).Decode(hs); err != nil {
@@ -257,14 +286,12 @@ func (s *Server) handshake(p *Peer) (*Handshake, error) {
 }
 
 func (s *Server) HandleMessage(msg *Message) error {
-	logrus.WithFields(logrus.Fields{
-		"from": msg.From,
-	})//.Info("received message")
-
 	switch v := msg.Payload.(type) {
 	case MessagePeerList:
-		//fmt.Printf("peers => %+v\n", v.Peers)
 		return s.handlePeerList(v)
+	case MessageCards:
+		fmt.Printf("%+v\n", v)
+		//s.gameState.SetStatus()
 	}
 	return nil
 }
@@ -286,4 +313,5 @@ func (s *Server) handlePeerList(l MessagePeerList) error {
 
 func init () {
 	gob.Register(MessagePeerList{})
+	gob.Register(MessageCards{})
 }
