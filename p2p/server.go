@@ -54,8 +54,8 @@ func NewServer(cfg ServerConfig) *Server {
 		peers: make(map[net.Addr]*Peer),
 		addPeer: make(chan *Peer, 100),
 		delPeer: make(chan *Peer),
-		msgCh: make(chan *Message),
-		broadcastch: make(chan any),
+		msgCh: make(chan *Message, 100),
+		broadcastch: make(chan any, 100),
 	}
 
 	s.gameState = NewGameState(s.ListenAddr, s.broadcastch)
@@ -81,13 +81,6 @@ func (s *Server) Start() {
 		"port": s.ListenAddr,
 		"variant": s.GameVariant,
 	}).Info("started new game server")
-
-	go func() {
-		msg := <-s.broadcastch
-		if err := s.Broadcast(msg); err != nil {
-			logrus.Errorf("broadcast error: %s", err)
-		}
-	}()
 
 	s.transport.ListenAndAccept()
 }
@@ -188,6 +181,10 @@ func (s *Server) Connect(addr string) error {
 func(s *Server) loop() {
 	for {
 		select {
+		case msg := <-s.broadcastch:
+			if err := s.Broadcast(msg); err != nil {
+				logrus.Errorf("broadcast error: %s", err)
+			}
 		case peer := <-s.delPeer:
 			logrus.WithFields(logrus.Fields{
 				"addr": peer.conn.RemoteAddr(),
@@ -291,7 +288,7 @@ func (s *Server) HandleMessage(msg *Message) error {
 		return s.handlePeerList(v)
 	case MessageCards:
 		fmt.Printf("%+v\n", v)
-		//s.gameState.SetStatus()
+		s.gameState.SetStatus(GameStatusReceivingCards)
 	}
 	return nil
 }

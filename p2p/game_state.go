@@ -72,7 +72,9 @@ func NewGameState(addr string,broadcastch chan any) *GameState {
 }
 
 func (g *GameState) SetStatus(s GameStatus) {
-	atomic.StoreInt32((*int32)(&g.gameStatus), int32(s))
+	if g.gameStatus != s {
+		atomic.StoreInt32((*int32)(&g.gameStatus), int32(s))
+	}
 }
 
 func (g *GameState) AddPlayerWaitingForCards() {
@@ -91,6 +93,11 @@ func (g *GameState) CheckNeedDealCards() {
 
 		g.DealCards()
 	}
+}
+
+func (g *GameState) InitiateShuffleAndDeal() {
+	g.SetStatus(GameStatusReceivingCards)
+	
 }
 
 func (g *GameState) DealCards() {
