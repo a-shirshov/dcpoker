@@ -5,41 +5,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/a-shirshov/dcpoker/deck"
+	//"github.com/a-shirshov/dcpoker/deck"
 	"github.com/sirupsen/logrus"
-)
-
-type GameStatus int32
-
-func (g GameStatus) String() string {
-	switch g{
-	case GameStatusWaitingForCards:
-		return "WAITING FOR CARDS"
-	case GameStatusReceivingCards:
-		return "RECEIVING CARDS"
-	case GameStatusDealing:
-		return "DEALING"
-	case GameStatusPreFlop:
-		return "PREFLOP"
-	case GameStatusFlop:
-		return "FLOP"
-	case GameStatusTurn:
-		return "TURN"
-	case GameStatusRiver:
-		return "RIVER"
-	default:
-		return "unknown"
-	}
-}
-
-const (
-	GameStatusWaitingForCards GameStatus = iota
-	GameStatusReceivingCards
-	GameStatusDealing 
-	GameStatusPreFlop
-	GameStatusFlop
-	GameStatusTurn
-	GameStatusRiver
 )
 
 type Player struct {
@@ -48,16 +15,19 @@ type Player struct {
 
 type GameState struct {
 	listenAddr string
-	broadcastch chan any
+	broadcastch chan BroadcastTo
 	isDealer bool
 	gameStatus GameStatus
 
 	playersWaitingForCards int32
 	playerLock sync.RWMutex
 	players map[string]*Player
+
+	receivedDecksLock sync.RWMutex
+	receivedDecks map[string]bool
 }
 
-func NewGameState(addr string,broadcastch chan any) *GameState {
+func NewGameState(addr string, broadcastch chan BroadcastTo) *GameState {
 	g := &GameState{
 		listenAddr: addr,
 		broadcastch: broadcastch,
@@ -91,22 +61,56 @@ func (g *GameState) CheckNeedDealCards() {
 			"address": g.listenAddr,
 		}).Info("need to deal cards")
 
-		g.DealCards()
+		g.InitiateShuffleAndDeal()
 	}
+}
+
+func (g *GameState) GetPlayersWithStatus(s GameStatus) []string {
+	players := []string{}
+	for addr := range g.players {
+		players = append(players, addr)
+	}
+	return players
+}
+
+func (g *GameState) SetDeckReceivedFromPlayer(from string) {
+	g.receivedDecksLock.Lock()
+	g.receivedDecks[from] = true
+	g.receivedDecksLock.Unlock()
+}
+
+func (g *GameState) ShuffleAndEncrypt(from string, deck [][]byte) error {
+	g.SetStatus(GameStatusReceivingCards)
+
+	g.SetDeckReceivedFromPlayer(from)
+	return nil
 }
 
 func (g *GameState) InitiateShuffleAndDeal() {
 	g.SetStatus(GameStatusReceivingCards)
+
+	//g.broadcastch <-MessageEncCards{Deck: [][]byte{}}
+	g.SendToPlayersWithStatus(MessageEncDeck{Deck: [][]byte{}}, GameStatusWaitingForCards)
 	
 }
 
 func (g *GameState) DealCards() {
-	deck := deck.New()
-	cards := MessageCards {
-		Deck: deck,
+
+	//g.broadcastch <- cards
+}
+
+func (g *GameState) SendToPlayersWithStatus(payload any, s GameStatus) {
+	players := g.GetPlayersWithStatus(s)
+
+	g.broadcastch <- BroadcastTo{
+		To: players,
+		Payload: payload,
 	}
 
-	g.broadcastch <- cards
+	logrus.WithFields(logrus.Fields{
+		"payload": payload,
+		"players": players,
+	}).Info("sending to players")
 }
 
 func (g *GameState) SetPlayerStatus(addr string, status GameStatus) {
@@ -151,6 +155,7 @@ func (g *GameState) loop() {
 		select {
 		case <-ticker.C:
 			logrus.WithFields(logrus.Fields{
+				"we": g.listenAddr,
 				"players connected": g.LenPlayersConnectedWithLock(),
 				"status": g.gameStatus,
 			}).Info()
