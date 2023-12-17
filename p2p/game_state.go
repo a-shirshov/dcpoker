@@ -23,8 +23,8 @@ type GameState struct {
 	playerLock sync.RWMutex
 	players map[string]*Player
 
-	receivedDecksLock sync.RWMutex
-	receivedDecks map[string]bool
+	decksReceivedLock sync.RWMutex
+	decksReceived map[string]bool
 }
 
 func NewGameState(addr string, broadcastch chan BroadcastTo) *GameState {
@@ -34,6 +34,7 @@ func NewGameState(addr string, broadcastch chan BroadcastTo) *GameState {
 		isDealer: false,
 		gameStatus: GameStatusWaitingForCards,
 		players: make(map[string]*Player),
+		decksReceived: make(map[string]bool),
 	}
 
 	go g.loop()
@@ -73,16 +74,30 @@ func (g *GameState) GetPlayersWithStatus(s GameStatus) []string {
 	return players
 }
 
-func (g *GameState) SetDeckReceivedFromPlayer(from string) {
-	g.receivedDecksLock.Lock()
-	g.receivedDecks[from] = true
-	g.receivedDecksLock.Unlock()
+func (g *GameState) SetDecksReceived(from string) {
+	g.decksReceivedLock.Lock()
+	g.decksReceived[from] = true
+	g.decksReceivedLock.Unlock()
 }
 
 func (g *GameState) ShuffleAndEncrypt(from string, deck [][]byte) error {
-	g.SetStatus(GameStatusReceivingCards)
 
-	g.SetDeckReceivedFromPlayer(from)
+	g.SetDecksReceived(from)
+
+	players := g.GetPlayersWithStatus(GameStatusReceivingCards)
+
+	g.decksReceivedLock.RLock()
+	for _, addr := range players {
+		_, ok := g.decksReceived[addr] 
+		if !ok {
+			return nil
+		}
+	}
+	g.decksReceivedLock.RUnlock()
+
+	g.SetStatus(GameStatusPreFlop)
+
+	g.SendToPlayersWithStatus(MessageEncDeck{Deck: [][]byte{}}, GameStatusReceivingCards)
 	return nil
 }
 
@@ -91,7 +106,6 @@ func (g *GameState) InitiateShuffleAndDeal() {
 
 	//g.broadcastch <-MessageEncCards{Deck: [][]byte{}}
 	g.SendToPlayersWithStatus(MessageEncDeck{Deck: [][]byte{}}, GameStatusWaitingForCards)
-	
 }
 
 func (g *GameState) DealCards() {
@@ -158,6 +172,7 @@ func (g *GameState) loop() {
 				"we": g.listenAddr,
 				"players connected": g.LenPlayersConnectedWithLock(),
 				"status": g.gameStatus,
+				"deckReceived": g.decksReceived,
 			}).Info()
 		}
 	}

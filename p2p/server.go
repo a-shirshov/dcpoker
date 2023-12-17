@@ -310,9 +310,9 @@ func (s *Server) handleMessage(msg *Message) error {
 			"we": s.ListenAddr,
 			"from": msg.From,
 		}).Info("recv enc deck")
-
-		s.gameState.ShuffleAndEncrypt(msg.From, v.Deck)
+		
 		s.gameState.SetStatus(GameStatusReceivingCards)
+		s.gameState.ShuffleAndEncrypt(msg.From, v.Deck)
 	}
 	return nil
 }
