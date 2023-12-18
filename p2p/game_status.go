@@ -3,7 +3,9 @@ package p2p
 type GameStatus int32
 
 func (g GameStatus) String() string {
-	switch g{
+	switch g {
+	case GameStatusShuffleAndDeal:
+		return "SHUFFLE AND DEAL"
 	case GameStatusWaitingForCards:
 		return "WAITING FOR CARDS"
 	case GameStatusReceivingCards:
@@ -25,6 +27,7 @@ func (g GameStatus) String() string {
 
 const (
 	GameStatusWaitingForCards GameStatus = iota
+	GameStatusShuffleAndDeal
 	GameStatusReceivingCards
 	GameStatusDealing 
 	GameStatusPreFlop
